@@ -58,6 +58,8 @@
     </div>
 
     <div id="results" class="mt-6 bg-gray-50 border border-gray-300 rounded p-4 text-gray-800 whitespace-pre-wrap font-mono"></div>
+
+    <div id="debug" class="mt-4 bg-yellow-50 border border-yellow-300 rounded p-4 text-yellow-800 whitespace-pre-wrap font-mono hidden"></div>
   </div>
 
   <script>
@@ -86,24 +88,31 @@
       { url: 'https://docs.google.com/spreadsheets/d/1Bx_mPCGAcK9QZbhUZxOTQQ2TaeXeroaP8GRGJpDORv0/edit#gid=1330013185', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
     ];
 
-    // Utility: parse date string flexibly
+    // Utility: parse date string flexibly, specifically for formats like "18 May 2025" and "18 Mai 2025"
     function parseDateFlexible(dateStr) {
       if (!dateStr) return null;
+      let str = dateStr.trim();
+
+      // Normalize 'Mai' to 'May' to handle Indonesian month abbreviation
+      str = str.replace(/\bMai\b/gi, 'May');
+
       // Try Date constructor
-      let d = new Date(dateStr);
+      let d = new Date(str);
       if (!isNaN(d)) return d;
-      // Try parsing dd MMM yyyy (e.g. 1 May 2025)
-      const parts = dateStr.trim().split(/[\s\-\/]+/);
+
+      // Try parsing dd MMM yyyy (e.g. 18 May 2025)
+      const parts = str.split(/[\s\-\/]+/);
       if (parts.length >= 3) {
-        const day = parseInt(parts[0], 10);
-        const monthStr = parts[1].toLowerCase();
-        const year = parseInt(parts[2], 10);
+        let day = parseInt(parts[0], 10);
+        let monthStr = parts[1].toLowerCase();
+        let year = parseInt(parts[2], 10);
         const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-        const month = monthNames.findIndex(m => monthStr.startsWith(m));
+        let month = monthNames.findIndex(m => monthStr.startsWith(m));
         if (month >= 0 && !isNaN(day) && !isNaN(year)) {
           return new Date(year, month, day);
         }
       }
+
       return null;
     }
 
@@ -132,10 +141,43 @@
       return parseCsv(text);
     }
 
-    // Simple CSV parser (handles commas, no quotes)
+    // Robust CSV parser that handles quoted fields and commas inside quotes
     function parseCsv(text) {
-      const lines = text.trim().split('\n');
-      return lines.map(line => line.split(','));
+      const rows = [];
+      let currentRow = [];
+      let currentValue = '';
+      let inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        if (char === '"') {
+          if (inQuotes && text[i + 1] === '"') {
+            // Escaped quote
+            currentValue += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (char === ',' && !inQuotes) {
+          currentRow.push(currentValue);
+          currentValue = '';
+        } else if ((char === '\n' || char === '\r') && !inQuotes) {
+          if (char === '\r' && text[i + 1] === '\n') {
+            i++;
+          }
+          currentRow.push(currentValue);
+          rows.push(currentRow);
+          currentRow = [];
+          currentValue = '';
+        } else {
+          currentValue += char;
+        }
+      }
+      // Add last value
+      if (currentValue !== '' || currentRow.length > 0) {
+        currentRow.push(currentValue);
+        rows.push(currentRow);
+      }
+      return rows;
     }
 
     // Process one sheet data with config and date range
@@ -145,14 +187,23 @@
       // startDate, endDate: Date objects or null
 
       // We will apply date range logic: if date cell empty, use last known date
+      // Now check both columns A (0) and B (1) for dates, use whichever is present
       let lastDate = null;
       const transactions = [];
 
       for (let i = 1; i < sheetData.length; i++) {
         const row = sheetData[i];
         if (!row) continue;
-        let dateCell = row[config.dateCol];
-        let date = parseDateFlexible(dateCell);
+        let dateCellA = row[0];
+        let dateCellB = row[1];
+        let dateA = parseDateFlexible(dateCellA);
+        let dateB = parseDateFlexible(dateCellB);
+        // Use dateB if present, else dateA
+        let date = dateB || dateA;
+        // Debug log raw date cells
+        console.log('Raw date cells:', dateCellA, dateCellB);
+        // Debug log parsed date
+        console.log('Parsed date:', date);
         if (!date && lastDate) {
           date = lastDate;
         } else if (date) {
@@ -161,9 +212,17 @@
           // no date and no lastDate, skip row
           continue;
         }
-        // Check date range filter
-        if (startDate && date < startDate) continue;
-        if (endDate && date > endDate) continue;
+        // Normalize dates to midnight for comparison
+        function normalizeDate(d) {
+          return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        }
+        const normDate = normalizeDate(date);
+        const normStart = startDate ? normalizeDate(startDate) : null;
+        const normEnd = endDate ? normalizeDate(endDate) : null;
+
+        // Check date range filter (inclusive)
+        if (normStart && normDate < normStart) continue;
+        if (normEnd && normDate > normEnd) continue;
 
         // Description
         const desc = row[config.descCol] ? row[config.descCol].trim() : '';
@@ -330,13 +389,24 @@
 
       try {
         const allTransactions = [];
+        const allParsedDates = new Set();
         for (const config of sheetsConfig) {
           try {
-            const sheetData = await fetchSheetCsv(config.url);
-            const transactions = processSheetData(sheetData, config, startDate, endDate);
-            if (transactions.length > 0) {
-              allTransactions.push({ sheetUrl: config.url, transactions });
-            }
+        const sheetData = await fetchSheetCsv(config.url);
+        // Debug output first 5 rows of sheetData
+        console.log('Sheet data preview for', config.url, sheetData.slice(0,5));
+        console.log('Date column index:', config.dateCol);
+        for (let i = 1; i < Math.min(sheetData.length, 6); i++) {
+          console.log('Row', i, 'date cell:', sheetData[i][config.dateCol]);
+        }
+        const transactions = processSheetData(sheetData, config, startDate, endDate);
+        // Collect all parsed dates for debug
+        for (const tx of transactions) {
+          allParsedDates.add(tx.date.toISOString().slice(0,10));
+        }
+        if (transactions.length > 0) {
+          allTransactions.push({ sheetUrl: config.url, transactions });
+        }
           } catch (e) {
             console.error('Error processing sheet:', config.url, e);
           }
@@ -348,8 +418,17 @@
           const comparisonResults = compareTransactions(allTransactions);
           renderResults(comparisonResults);
         }
+
+        // Show debug info
+        const debugDiv = document.getElementById('debug');
+        debugDiv.textContent = 'Selected Date Range: ' + (startDate ? startDate.toISOString().slice(0,10) : 'None') + ' to ' + (endDate ? endDate.toISOString().slice(0,10) : 'None') + '\n' +
+          'Parsed Dates Found:\n' + Array.from(allParsedDates).sort().join(', ');
+        debugDiv.classList.remove('hidden');
       } catch (e) {
         resultsDiv.textContent = 'Error: ' + e.message;
+        const debugDiv = document.getElementById('debug');
+        debugDiv.textContent = 'Error: ' + e.message;
+        debugDiv.classList.remove('hidden');
       } finally {
         startBtn.disabled = false;
         loading.classList.add('hidden');
