@@ -1,84 +1,362 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Location Tracker</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        #map { height: 400px; }
-        .pulse {
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0% { transform: scale(0.95); opacity: 0.7; }
-            70% { transform: scale(1.1); opacity: 1; }
-            100% { transform: scale(0.95); opacity: 0.7; }
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Money Flow Checker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"
+  />
+  <style>
+    /* Custom scrollbar for results */
+    #results {
+      max-height: 500px;
+      overflow-y: auto;
+    }
+  </style>
 </head>
-<body class="bg-gray-100">
-    <div class="min-h-screen">
-        <!-- Header -->
-        <header class="bg-blue-600 text-white p-4 shadow-lg">
-            <div class="container mx-auto flex justify-between items-center">
-                <h1 class="text-2xl font-bold"><i class="fas fa-map-marker-alt mr-2"></i>Location Tracker</h1>
-                <button id="refreshBtn" class="bg-blue-700 hover:bg-blue-800 px-4 py-2 rounded-lg">
-                    <i class="fas fa-sync-alt"></i> Refresh
-                </button>
-            </div>
-        </header>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center p-4 font-sans">
+  <h1 class="text-3xl font-bold mb-6 text-gray-800">Money Flow Checker</h1>
 
-        <!-- Main Content -->
-        <main class="container mx-auto p-4">
-            <!-- Map Section -->
-            <div class="bg-white rounded-lg shadow-md p-4 mb-6">
-                <div id="map" class="rounded-lg"></div>
-            </div>
+  <div class="w-full max-w-5xl bg-white rounded-lg shadow p-6">
+    <p class="mb-4 text-gray-700">
+      Click "Start" to check money inflow and outflow across multiple Google Sheets.
+      The app will read all sheets, parse dates, descriptions, and amounts, then compare and show discrepancies.
+    </p>
 
-            <!-- Current Location Info -->
-            <div class="bg-white rounded-lg shadow-md p-4 mb-6">
-                <h2 class="text-xl font-semibold mb-4 text-gray-800">
-                    <i class="fas fa-location-arrow mr-2 text-blue-500"></i>Current Location
-                </h2>
-                <div id="currentLocation" class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="bg-gray-50 p-3 rounded-lg">
-                        <p class="text-sm text-gray-500">Latitude</p>
-                        <p id="latitude" class="text-lg font-medium">-</p>
-                    </div>
-                    <div class="bg-gray-50 p-3 rounded-lg">
-                        <p class="text-sm text-gray-500">Longitude</p>
-                        <p id="longitude" class="text-lg font-medium">-</p>
-                    </div>
-                    <div class="bg-gray-50 p-3 rounded-lg">
-                        <p class="text-sm text-gray-500">Accuracy</p>
-                        <p id="accuracy" class="text-lg font-medium">-</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- History Section -->
-            <div class="bg-white rounded-lg shadow-md p-4">
-                <h2 class="text-xl font-semibold mb-4 text-gray-800">
-                    <i class="fas fa-history mr-2 text-blue-500"></i>Location History
-                </h2>
-                <div id="historyList" class="space-y-2">
-                    <p class="text-gray-500 italic">No location history yet</p>
-                </div>
-            </div>
-        </main>
-
-        <!-- Notification Area -->
-        <div id="notification" class="fixed bottom-4 right-4 hidden">
-            <div class="bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg">
-                <span id="notificationText"></span>
-            </div>
-        </div>
-
-        <script src="script.js"></script>
+    <div class="mb-4">
+      <label for="startDate" class="block font-semibold mb-1">Start Date (inclusive):</label>
+      <input
+        type="date"
+        id="startDate"
+        class="border border-gray-300 rounded px-3 py-2 w-full max-w-xs"
+        value=""
+      />
     </div>
+
+    <div class="mb-6">
+      <label for="endDate" class="block font-semibold mb-1">End Date (inclusive):</label>
+      <input
+        type="date"
+        id="endDate"
+        class="border border-gray-300 rounded px-3 py-2 w-full max-w-xs"
+        value=""
+      />
+    </div>
+
+    <button
+      id="startBtn"
+      class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-3 rounded shadow flex items-center gap-2"
+    >
+      <i class="fas fa-play"></i> Start
+    </button>
+
+    <div id="loading" class="mt-4 text-blue-600 font-semibold hidden">
+      Loading and processing sheets, please wait...
+    </div>
+
+    <div id="results" class="mt-6 bg-gray-50 border border-gray-300 rounded p-4 text-gray-800 whitespace-pre-wrap font-mono"></div>
+  </div>
+
+  <script>
+    // List of Google Sheets URLs and their column mappings
+    // Each entry: { url, dateCol, descCol, moneyInCols, moneyOutCols }
+    // Columns are 0-based indices (A=0, B=1, etc.)
+    const sheetsConfig = [
+      { url: 'https://docs.google.com/spreadsheets/d/1wrxIwaQF2witO3_N6AzxbpVR58FBXcxHin7SnEwGA2M/edit#gid=1651792308', dateCol: 0, descCol: 3, moneyInCols: [6,7], moneyOutCols: [8] },
+      { url: 'https://docs.google.com/spreadsheets/d/158mPAFn-Z6uuXFGrO84OAfeTU9DY6KJcSIZVnxp5yII/edit#gid=363669562', dateCol: 0, descCol: 3, moneyInCols: [6,7], moneyOutCols: [8] },
+      { url: 'https://docs.google.com/spreadsheets/d/1WR_Ld4XBt5hno_lr2KNQUUTrfbstQkzQfEVOjwJCjUQ/edit#gid=1584703378', dateCol: 0, descCol: 3, moneyInCols: [6], moneyOutCols: [7] },
+      { url: 'https://docs.google.com/spreadsheets/d/1wZjo0xXq2Oje6Zpqq_L3EH89lmyL20aA7ZR8rg0QQZE/edit#gid=1061475675', dateCol: 0, descCol: 3, moneyInCols: [6], moneyOutCols: [7] },
+      { url: 'https://docs.google.com/spreadsheets/d/1WtvlQa7lnL6oe6BkwlXr0ht0GSX6v9OpmmKX1BDjrRI/edit#gid=724199930', dateCol: 0, descCol: 3, moneyInCols: [6], moneyOutCols: [7] },
+      { url: 'https://docs.google.com/spreadsheets/d/1BY2V2k0gDbQrMds8DI9oZq5fqnywiT6MqF_TfjduXKE/edit#gid=1281935228', dateCol: 0, descCol: 3, moneyInCols: [6], moneyOutCols: [7] },
+      { url: 'https://docs.google.com/spreadsheets/d/15xHH40OpbLEKMvo_jaJpRmmTYkH2HONx9nMM01wJLuo/edit#gid=0', dateCol: 0, descCol: 3, moneyInCols: [4], moneyOutCols: [5] },
+      { url: 'https://docs.google.com/spreadsheets/d/1D5nBRGN3A7aCNjR5IJnxJsNe4w9ARLt30eV9WKJIZM4/edit#gid=0', dateCol: 0, descCol: 3, moneyInCols: [4], moneyOutCols: [5] },
+      { url: 'https://docs.google.com/spreadsheets/d/11uNDM8HsulUxrOidBlAuzuaGXqaB0QLJZAEudSVB-fw/edit#gid=1156340341', dateCol: 0, descCol: 3, moneyInCols: [4], moneyOutCols: [5] },
+      { url: 'https://docs.google.com/spreadsheets/d/1AkvqSeqV7ohQb_MPhoV4Ny0N-VoGSL4D0dc7sEb2KaM/edit#gid=0', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
+      { url: 'https://docs.google.com/spreadsheets/d/1STA9lnyqBBk8tqkyloNN5-JSIAtvWeb1Y5VaRN5Fs2M/edit#gid=922618847', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
+      { url: 'https://docs.google.com/spreadsheets/d/1jRN7OIJ3M_V1EPVHeIGvaMdm0xmj2ofw2w3X_8v7Ddg/edit#gid=767689764', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
+      { url: 'https://docs.google.com/spreadsheets/d/1hXPwdt3EeJZVCKBXxuz0P0DvAACH4ult2b_iB-9_tvw/edit#gid=789523873', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
+      { url: 'https://docs.google.com/spreadsheets/d/1Yq09uJdf22Bihjz-pvSMJ1ZPUcHPk-v5X2p4NB3Dl2o/edit#gid=1539720951', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
+      { url: 'https://docs.google.com/spreadsheets/d/1E1D97EON-CIH8ILLplQ65aomf_kubIXKU-ZXug1DwK8/edit#gid=709687602', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
+      { url: 'https://docs.google.com/spreadsheets/d/17Pz5JNs-EJ5ycH_rID4HwraDTUS2L7mUSyZRo24WRMM/edit#gid=1733085718', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
+      { url: 'https://docs.google.com/spreadsheets/d/1nEDoqbUwfYnlJmkUvgWcHhTHz2WTbgSbF1vokNB5TJA/edit#gid=1627158766', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
+      { url: 'https://docs.google.com/spreadsheets/d/1S6jg751t5KtKqYtgNQF8u1Lb9T2A7IiSL5eQO55zTXk/edit#gid=76034282', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
+      { url: 'https://docs.google.com/spreadsheets/d/1Bx_mPCGAcK9QZbhUZxOTQQ2TaeXeroaP8GRGJpDORv0/edit#gid=1330013185', dateCol: 1, descCol: 4, moneyInCols: [5], moneyOutCols: [6] },
+    ];
+
+    // Utility: parse date string flexibly
+    function parseDateFlexible(dateStr) {
+      if (!dateStr) return null;
+      // Try Date constructor
+      let d = new Date(dateStr);
+      if (!isNaN(d)) return d;
+      // Try parsing dd MMM yyyy (e.g. 1 May 2025)
+      const parts = dateStr.trim().split(/[\s\-\/]+/);
+      if (parts.length >= 3) {
+        const day = parseInt(parts[0], 10);
+        const monthStr = parts[1].toLowerCase();
+        const year = parseInt(parts[2], 10);
+        const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+        const month = monthNames.findIndex(m => monthStr.startsWith(m));
+        if (month >= 0 && !isNaN(day) && !isNaN(year)) {
+          return new Date(year, month, day);
+        }
+      }
+      return null;
+    }
+
+    // Utility: format date to yyyy-mm-dd
+    function formatDate(d) {
+      if (!(d instanceof Date)) return '';
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    // Fetch sheet data as CSV and parse
+    async function fetchSheetCsv(sheetUrl) {
+      // Extract spreadsheetId and gid
+      const matchId = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+      const matchGid = sheetUrl.match(/gid=([0-9]+)/);
+      if (!matchId || !matchGid) throw new Error('Invalid Google Sheet URL: ' + sheetUrl);
+      const spreadsheetId = matchId[1];
+      const gid = matchGid[1];
+      // Construct CSV export URL
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`;
+      const response = await fetch(csvUrl);
+      if (!response.ok) throw new Error('Failed to fetch CSV: ' + csvUrl);
+      const text = await response.text();
+      return parseCsv(text);
+    }
+
+    // Simple CSV parser (handles commas, no quotes)
+    function parseCsv(text) {
+      const lines = text.trim().split('\n');
+      return lines.map(line => line.split(','));
+    }
+
+    // Process one sheet data with config and date range
+    function processSheetData(sheetData, config, startDate, endDate) {
+      // sheetData: array of rows (array of columns)
+      // config: {dateCol, descCol, moneyInCols, moneyOutCols}
+      // startDate, endDate: Date objects or null
+
+      // We will apply date range logic: if date cell empty, use last known date
+      let lastDate = null;
+      const transactions = [];
+
+      for (let i = 1; i < sheetData.length; i++) {
+        const row = sheetData[i];
+        if (!row) continue;
+        let dateCell = row[config.dateCol];
+        let date = parseDateFlexible(dateCell);
+        if (!date && lastDate) {
+          date = lastDate;
+        } else if (date) {
+          lastDate = date;
+        } else {
+          // no date and no lastDate, skip row
+          continue;
+        }
+        // Check date range filter
+        if (startDate && date < startDate) continue;
+        if (endDate && date > endDate) continue;
+
+        // Description
+        const desc = row[config.descCol] ? row[config.descCol].trim() : '';
+
+        // Sum money in columns
+        let moneyIn = 0;
+        for (const col of config.moneyInCols) {
+          const val = parseFloat((row[col] || '').replace(/[^0-9.-]+/g, ''));
+          if (!isNaN(val)) moneyIn += val;
+        }
+        // Sum money out columns
+        let moneyOut = 0;
+        for (const col of config.moneyOutCols) {
+          const val = parseFloat((row[col] || '').replace(/[^0-9.-]+/g, ''));
+          if (!isNaN(val)) moneyOut += val;
+        }
+
+        transactions.push({
+          date,
+          desc,
+          moneyIn,
+          moneyOut,
+          rawRow: row,
+        });
+      }
+      return transactions;
+    }
+
+    // Extract sheet names from description flexibly
+    // We will look for known sheet names or tokens in description
+    // For demo, we extract all uppercase words or known bank names
+    function extractSheetNames(desc) {
+      if (!desc) return [];
+      // Known sheet names or tokens (can be extended)
+      const knownNames = [
+        'BCA', 'ADIB', 'MANDIRI', 'KAS', 'BMANDIRI', 'DWI', 'NANANG', 'SULAIMAN', 'PUTRA', 'RATTHANA', 'BCA', 'BCA', 'BMANDIRI'
+      ];
+      const found = [];
+      const descUpper = desc.toUpperCase();
+      for (const name of knownNames) {
+        if (descUpper.includes(name)) {
+          found.push(name);
+        }
+      }
+      // If none found, fallback to uppercase words in desc
+      if (found.length === 0) {
+        const words = desc.match(/\b[A-Z]{2,}\b/g);
+        if (words) {
+          found.push(...words);
+        }
+      }
+      return [...new Set(found)];
+    }
+
+    // Compare transactions from all sheets and find discrepancies
+    // We will group by date and sheet names found in desc
+    function compareTransactions(allTransactions) {
+      // allTransactions: array of {sheetUrl, transactions[]}
+      // Build map: date -> sheetName -> {moneyIn, moneyOut}
+      const map = new Map();
+
+      for (const { sheetUrl, transactions } of allTransactions) {
+        for (const tx of transactions) {
+          const dateStr = formatDate(tx.date);
+          const sheetNames = extractSheetNames(tx.desc);
+          if (sheetNames.length === 0) {
+            // Use sheetUrl as fallback sheet name
+            sheetNames.push(sheetUrl);
+          }
+          if (!map.has(dateStr)) map.set(dateStr, new Map());
+          const dateMap = map.get(dateStr);
+          for (const sheetName of sheetNames) {
+            if (!dateMap.has(sheetName)) {
+              dateMap.set(sheetName, { moneyIn: 0, moneyOut: 0 });
+            }
+            const val = dateMap.get(sheetName);
+            val.moneyIn += tx.moneyIn;
+            val.moneyOut += tx.moneyOut;
+          }
+        }
+      }
+
+      // Now compare moneyIn and moneyOut between sheets per date
+      // We will check if total moneyIn == total moneyOut per date
+      // And if per sheet moneyIn/out matches with others
+      const results = [];
+
+      for (const [dateStr, dateMap] of map.entries()) {
+        // Sum all moneyIn and moneyOut
+        let totalIn = 0;
+        let totalOut = 0;
+        for (const val of dateMap.values()) {
+          totalIn += val.moneyIn;
+          totalOut += val.moneyOut;
+        }
+        const safe = Math.abs(totalIn - totalOut) < 0.01;
+
+        // Find discrepancies per sheet
+        const discrepancies = [];
+        for (const [sheetName, val] of dateMap.entries()) {
+          // If moneyIn and moneyOut differ significantly, mark discrepancy
+          if (Math.abs(val.moneyIn - val.moneyOut) > 0.01) {
+            discrepancies.push({
+              sheetName,
+              moneyIn: val.moneyIn,
+              moneyOut: val.moneyOut,
+              diff: val.moneyIn - val.moneyOut,
+            });
+          }
+        }
+
+        results.push({
+          date: dateStr,
+          safe,
+          totalIn,
+          totalOut,
+          discrepancies,
+        });
+      }
+
+      return results;
+    }
+
+    // Render results to #results div
+    function renderResults(results) {
+      const container = document.getElementById('results');
+      if (results.length === 0) {
+        container.textContent = 'No transactions found in the specified date range.';
+        return;
+      }
+      let output = '';
+      for (const res of results) {
+        output += `Date: ${res.date}\n`;
+        output += `Total Money In: ${res.totalIn.toFixed(2)}\n`;
+        output += `Total Money Out: ${res.totalOut.toFixed(2)}\n`;
+        if (res.safe) {
+          output += `Status: AMAN BOS KU ✅\n`;
+        } else {
+          output += `Status: SELISIH ❌\n`;
+          output += `Discrepancies:\n`;
+          for (const d of res.discrepancies) {
+            output += `  Sheet: ${d.sheetName}, Money In: ${d.moneyIn.toFixed(2)}, Money Out: ${d.moneyOut.toFixed(2)}, Difference: ${d.diff.toFixed(2)}\n`;
+          }
+        }
+        output += '\n';
+      }
+      container.textContent = output;
+    }
+
+    // Main function triggered by start button
+    async function startProcess() {
+      const startBtn = document.getElementById('startBtn');
+      const loading = document.getElementById('loading');
+      const resultsDiv = document.getElementById('results');
+      resultsDiv.textContent = '';
+      startBtn.disabled = true;
+      loading.classList.remove('hidden');
+
+      // Get date range from inputs
+      const startDateInput = document.getElementById('startDate').value;
+      const endDateInput = document.getElementById('endDate').value;
+      const startDate = startDateInput ? new Date(startDateInput) : null;
+      const endDate = endDateInput ? new Date(endDateInput) : null;
+
+      try {
+        const allTransactions = [];
+        for (const config of sheetsConfig) {
+          try {
+            const sheetData = await fetchSheetCsv(config.url);
+            const transactions = processSheetData(sheetData, config, startDate, endDate);
+            if (transactions.length > 0) {
+              allTransactions.push({ sheetUrl: config.url, transactions });
+            }
+          } catch (e) {
+            console.error('Error processing sheet:', config.url, e);
+          }
+        }
+
+        if (allTransactions.length === 0) {
+          resultsDiv.textContent = 'No transactions found in the specified date range.';
+        } else {
+          const comparisonResults = compareTransactions(allTransactions);
+          renderResults(comparisonResults);
+        }
+      } catch (e) {
+        resultsDiv.textContent = 'Error: ' + e.message;
+      } finally {
+        startBtn.disabled = false;
+        loading.classList.add('hidden');
+      }
+    }
+
+    document.getElementById('startBtn').addEventListener('click', startProcess);
+  </script>
 </body>
 </html>
